@@ -67,9 +67,8 @@ class HttpClient(QuicConnectionProtocol):
     
     async def communicate(self) -> None:
         stream_id = self._quic.get_next_available_stream_id()
-        while True:
-            _packet = os.read(tun, 2048)
-            await self.send_message(stream_id, _packet)
+        _packet = os.read(tun, 2048)
+        await self.send_message(stream_id, _packet)
 
 async def main(connectors) -> None:
     while True:
@@ -162,4 +161,3 @@ if __name__ == "__main__":
     asyncio.run(
         main(Connectors)
     )
-

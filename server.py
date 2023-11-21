@@ -43,9 +43,9 @@ class HttpServerProtocol(QuicConnectionProtocol):
             # pass the extracted packet to tun interface
             os.write(tun, bytes(pkt))
 
-    def data_received_resource(self):
+    async def data_received_resource(self):
         while True:
-            pkt = os.read(tun, 2048)
+            pkt = await self.loop.run_in_executor(None, os.read, tun, 2048)
             if pkt:
                 self._quic.send_datagram_frame(pkt)
                 self.transmit()
@@ -85,31 +85,30 @@ async def main(
 
 if __name__ == "__main__":
 
-    tunnelremoteprealip = "192.168.121.4"
-    tunnellocalip = "10.0.0.2"
-    tunnelsubnetmask = "24"
+    # tunnellocalip = "10.0.0.2"
+    # tunnelsubnetmask = "24"
 
-    TUNSETIFF = 0x400454ca
-    IFF_TUN = 0x0001
-    IFF_TAP = 0x0002
-    IFF_NO_PI = 0x1000
+    # TUNSETIFF = 0x400454ca
+    # IFF_TUN = 0x0001
+    # IFF_TAP = 0x0002
+    # IFF_NO_PI = 0x1000
 
-    # Create the tun interface
-    tun = os.open("/dev/net/tun", os.O_RDWR)
-    ifr = struct.pack('16sH', b'tun%d', IFF_TUN | IFF_NO_PI)
-    ifname_bytes = fcntl.ioctl(tun, TUNSETIFF, ifr)
+    # # Create the tun interface
+    # tun = os.open("/dev/net/tun", os.O_RDWR)
+    # ifr = struct.pack('16sH', b'tun%d', IFF_TUN | IFF_NO_PI)
+    # ifname_bytes = fcntl.ioctl(tun, TUNSETIFF, ifr)
 
-    # Get the interface name
-    ifname = ifname_bytes.decode('UTF-8')[:16].strip("\x00")
+    # # Get the interface name
+    # ifname = ifname_bytes.decode('UTF-8')[:16].strip("\x00")
 
-    #setup the ip and bring the interface up
-    os.system("ip addr add {}/{} dev {}".format(tunnellocalip,tunnelsubnetmask,ifname))
-    os.system("ip link set dev {} up".format(ifname))
+    # #setup the ip and bring the interface up
+    # os.system("ip addr add {}/{} dev {}".format(tunnellocalip,tunnelsubnetmask,ifname))
+    # os.system("ip link set dev {} up".format(ifname))
 
-    os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
-    os.system("iptables -A FORWARD -i tun0 -o enp0s8 -j ACCEPT")
-    os.system("iptables -A FORWARD -i enp0s8 -o tun0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
-    os.system("iptables -t nat -A POSTROUTING -o enp0s8 -j MASQUERADE")
+    # os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
+    # os.system("iptables -A FORWARD -i tun0 -o enp0s8 -j ACCEPT")
+    # os.system("iptables -A FORWARD -i enp0s8 -o tun0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
+    # os.system("iptables -t nat -A POSTROUTING -o enp0s8 -j MASQUERADE")
 
     host = "localhost"
     port = 4433
