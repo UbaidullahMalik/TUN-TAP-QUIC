@@ -6,11 +6,10 @@ from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import QuicEvent, StreamDataReceived, ConnectionIdIssued, ConnectionIdRetired, ConnectionTerminated, DatagramFrameReceived
 from aioquic.tls import SessionTicket
 import logging
-import select
+import os
 import fcntl
 import struct
-import os
-from scapy.all import *
+from scapy.all import IP
 
 AsgiApplication = Callable
 
@@ -35,7 +34,6 @@ class HttpServerProtocol(QuicConnectionProtocol):
             if b"quack" == event.data:
                 print("Received QUACK")
                 self._quic.send_datagram_frame(b"quack-ack")
-                self.transmit()
 
         if isinstance(event, StreamDataReceived):
             stream_id = event.stream_id
@@ -43,13 +41,17 @@ class HttpServerProtocol(QuicConnectionProtocol):
             pkt = IP(data)
             # pass the extracted packet to tun interface
             os.write(self.tun, bytes(pkt))
+            
+            # Send the response back to the client who requested the resource
+            self._quic.send_stream_data(stream_id, b"Response data", end_stream=True)
 
-    async def data_received_resource(self):
+    async def data_received_resource(self) -> None:
         while True:
             pkt = await self.loop.run_in_executor(None, os.read, self.tun, 2048)
             if pkt:
-                self._quic.send_datagram_frame(pkt)
-                self.transmit()
+                # Assuming stream_id is 0, change it according to your application
+                self._quic.send_stream_data(0, pkt, end_stream=False)
+                await asyncio.sleep(0.1)
 
 class SessionTicketStore:
     """
@@ -103,8 +105,8 @@ if __name__ == "__main__":
     # Get the interface name
     ifname = ifname_bytes.decode('UTF-8')[:16].strip("\x00")
 
-    #setup the ip and bring the interface up
-    os.system("ip addr add {}/{} dev {}".format(tunnellocalip,tunnelsubnetmask,ifname))
+    # setup the ip and bring the interface up
+    os.system("ip addr add {}/{} dev {}".format(tunnellocalip, tunnelsubnetmask, ifname))
     os.system("ip link set dev {} up".format(ifname))
 
     os.system("echo 1 > /proc/sys/net/ipv4/ip_forward")
@@ -112,7 +114,7 @@ if __name__ == "__main__":
     os.system("iptables -A FORWARD -i enp0s8 -o tun0 -m state --state ESTABLISHED,RELATED -j ACCEPT")
     os.system("iptables -t nat -A POSTROUTING -o enp0s8 -j MASQUERADE")
 
-    host = "localhost"
+    host = "0.0.0.0"
     port = 4433
 
     configuration = QuicConfiguration(

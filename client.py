@@ -33,15 +33,16 @@ class HttpClient(QuicConnectionProtocol):
                 print("Received QUACK-ACK")
 
         if isinstance(event, StreamDataReceived):
-            stream_id = event.stream_id
-            data = event.data
-            pkt = IP(data)
-            # pass the extracted packet to tun interface
-            os.write(self.tun, bytes(pkt))
+            pass
+            # stream_id = event.stream_id
+            # data = event.data
+            # pkt = IP(data)
+            # # pass the extracted packet to tun interface
+            # os.write(self.tun, bytes(pkt))
             
-            self._request_events[stream_id].append(data)
-            waiter = self._request_waiter.pop(stream_id)
-            waiter.set_result(self._request_events.pop(stream_id))
+            # self._request_events[stream_id].append(data)
+            # waiter = self._request_waiter.pop(stream_id)
+            # waiter.set_result(self._request_events.pop(stream_id))
 
     # send quack every 20 seconds
     async def send_quack(self) -> None:
@@ -67,9 +68,43 @@ class HttpClient(QuicConnectionProtocol):
         return await asyncio.shield(waiter)
     
     async def communicate(self) -> None:
-        stream_id = self._quic.get_next_available_stream_id()
-        _packet = os.read(self.tun, 2048)
-        await self.send_message(stream_id, _packet)
+        while True:
+            # Read a packet from the tun interface
+            _packet = os.read(self.tun, 2048)
+
+            # Send the packet in the background
+            send_task = asyncio.create_task(self.send_message(self._quic.get_next_available_stream_id(), _packet))
+
+            # Handle incoming messages concurrently
+            receive_task = asyncio.create_task(self.receive_messages())
+
+            # Wait for either task to complete
+            done, _ = await asyncio.wait(
+                [send_task, receive_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Cancel the other task to avoid resource leaks
+            for task in done:
+                if task != send_task:
+                    task.cancel()
+
+    async def receive_messages(self) -> None:
+        while True:
+            await asyncio.sleep(0.1)  # Adjust the sleep duration as needed
+
+            # Check for incoming messages
+            event = await self._quic.wait(0.1)
+            if isinstance(event, StreamDataReceived):
+                stream_id = event.stream_id
+                data = event.data
+                pkt = IP(data)
+                # pass the extracted packet to the tun interface
+                os.write(self.tun, bytes(pkt))
+
+                self._request_events[stream_id].append(data)
+                waiter = self._request_waiter.pop(stream_id)
+                waiter.set_result(self._request_events.pop(stream_id))
 
 async def main(connectors, tun) -> None:
     while True:
