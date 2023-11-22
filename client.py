@@ -18,8 +18,9 @@ from scapy.all import *
 USER_AGENT = "aioquic/" + aioquic.__version__
 
 class HttpClient(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, tun, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self.tun = tun
         self._request_events: Dict[int, Deque] = {}
         self._request_waiter: Dict[int, asyncio.Future[Deque]] = {}
 
@@ -36,7 +37,7 @@ class HttpClient(QuicConnectionProtocol):
             data = event.data
             pkt = IP(data)
             # pass the extracted packet to tun interface
-            os.write(tun, bytes(pkt))
+            os.write(self.tun, bytes(pkt))
             
             self._request_events[stream_id].append(data)
             waiter = self._request_waiter.pop(stream_id)
@@ -67,27 +68,27 @@ class HttpClient(QuicConnectionProtocol):
     
     async def communicate(self) -> None:
         stream_id = self._quic.get_next_available_stream_id()
-        _packet = os.read(tun, 2048)
+        _packet = os.read(self.tun, 2048)
         await self.send_message(stream_id, _packet)
 
-async def main(connectors) -> None:
+async def main(connectors, tun) -> None:
     while True:
         tasks = []
         for connector in connectors:
-            task = asyncio.create_task(connect_and_run(*connector.get_config_parameters()))
+            task = asyncio.create_task(connect_and_run(tun, *connector.get_config_parameters()))
             tasks.append(task)
 
         await asyncio.gather(*tasks)
         await asyncio.sleep(5)
 
-async def connect_and_run(host, port, configuration) -> None:
+async def connect_and_run(tun, host, port, configuration) -> None:
     while True:
         try:
             async with connect(
                 host,
                 port,
                 configuration=configuration,
-                create_protocol=HttpClient,
+                create_protocol=lambda *args, **kwargs: HttpClient(tun, *args, **kwargs),
             ) as client:
                 client = cast(HttpClient, client)
                 print("Connected to", host, ":", port)
@@ -112,11 +113,10 @@ class ConnectConfig:
 
     def get_config_parameters(self):
         return self.host, self.port, self.configuration
-
+    
 if __name__ == "__main__":
 
     tunnelremoteprealip = "192.168.121.6"
-    tunnelremoteprealport = 9090
     tunnellocalip = "10.0.0.1"
     tunnelsubnetmask = "24"
     tunneltargetsubnet = "192.168.122.0"
@@ -158,6 +158,4 @@ if __name__ == "__main__":
         level=logging.INFO
     )
 
-    asyncio.run(
-        main(Connectors)
-    )
+    asyncio.run(main(Connectors, tun))
